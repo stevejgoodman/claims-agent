@@ -8,6 +8,7 @@ BASELINE = AgentConfig()
 
 CONFIGS = {
     "baseline": BASELINE,
+    "with_context": replace(BASELINE, use_context=True),
     "no_memory": replace(BASELINE, use_memory=False),
     "no_payout_tool": replace(BASELINE, use_payout_tool=False),
     "high_reasoning": replace(BASELINE, reasoning_effort="high"),

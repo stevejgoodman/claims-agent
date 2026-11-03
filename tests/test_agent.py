@@ -85,3 +85,22 @@ def test_run_claim_with_nothing_recorded_refers(dataset, sets, scripted_model):
     agent = build_agent(AgentConfig(use_memory=False), dataset, llm=scripted_model(AIMessage(content="no")))
     run = run_claim(agent, sets[0][0], dataset)
     assert (run.decision, run.rationale) == ("refer", "Nothing recorded")
+
+
+def test_context_tools_find_the_manual_and_the_wording():
+    from agent.context import load_context, make_context_tools
+
+    documents = load_context()
+    tools = make_context_tools(documents)
+    list_files, read_file, search = tools
+    assert "claims_manual.md" in list_files.invoke({}) and "policy_wording.md" in list_files.invoke({})
+    assert "$350 a night" in search.invoke({"query": "hotel accommodation per night trip delay"})
+    assert read_file.invoke({"name": "claims_manual.md", "section": "Meals without receipts"}).startswith("## 10.")
+    assert "no file" in read_file.invoke({"name": "nope.md"})
+    assert "Nothing found" in search.invoke({"query": "zzzz"})
+
+
+def test_context_tools_are_optional(dataset, scripted_model):
+    names = lambda config: {t.name for t in build_agent(config, dataset, llm=scripted_model()).graph.get_graph().nodes["tools"].data.tools_by_name.values()}  # noqa: E731
+    assert "search_context" in names(AgentConfig(use_memory=False, use_context=True))
+    assert "search_context" not in names(AgentConfig(use_memory=False))
