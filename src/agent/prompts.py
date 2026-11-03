@@ -19,13 +19,23 @@ MEMORY_LINE = "When you are asked a question, use your tools to search your memo
 # Only added when the agent has the payout tool
 PAYOUT_TOOL_LINE = "Use the payout tool to work out the payout on an approved claim, and record the payout it returns.\n"
 
+# Only added when the agent has the context tools
+CONTEXT_LINE = (
+    "The policy wording and the claims handling manual are not in this message. "
+    "Search or read them with your context tools to find the rules that apply, and rely on them over your own assumptions.\n"
+)
 
-def build_system_prompt(use_memory: bool = True, use_payout_tool: bool = True, instructions: str = INSTRUCTIONS) -> str:
+
+def build_system_prompt(
+    use_memory: bool = True, use_payout_tool: bool = True, instructions: str = INSTRUCTIONS, use_context: bool = False
+) -> str:
     prompt = instructions
     if use_memory:
         prompt += MEMORY_LINE
     if use_payout_tool:
         prompt += PAYOUT_TOOL_LINE
+    if use_context:
+        prompt += CONTEXT_LINE
     return prompt
 
 
