@@ -1,0 +1,20 @@
+.omni/
+.claude/
+.github/
+.cursor/
+.kiro/
+.agents/
+.env.omni
+.omni/collector.json
+
+# secrets, caches, local state
+.env
+.venv/
+.DS_Store
+__pycache__/
+.pytest_cache/
+.coverage
+.deepeval/
+
+# notebooks
+notebooks/
