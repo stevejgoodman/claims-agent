@@ -30,23 +30,35 @@ def run_goldens(agent, goldens, dataset: Dataset, trace: bool = False) -> list:
 
 def run_experiment(name: str, config: AgentConfig, claims: list[dict], dataset: Dataset, n_times: int = 1) -> pd.DataFrame:
     """Run a config on the claims n_times, score each run with DeepEval, and return the claims of every run in one table."""
-    from deepeval import evaluate
+    from deepeval.dataset import EvaluationDataset
     from deepeval.evaluate.configs import AsyncConfig
+    from deepeval.integrations.langchain import CallbackHandler
+    from deepeval.tracing import observe, update_current_trace
     from deepeval.tracing.context import current_span_context, current_trace_context
 
     goldens = make_goldens(claims, dataset)
     agent = build_agent(config, dataset)
+
+    @observe(type="agent")
+    def traced_claim(golden):
+        """Run the agent on one golden inside the iterator, so its trace is saved and scored with the golden's test case."""
+        run = run_claim(agent, json.loads(golden.input), dataset, [CallbackHandler()])
+        print(f"{golden.name}: {run.decision} ${run.payout:,.2f}")
+        test_case = to_test_case(run, golden, agent.config)
+        update_current_trace(name=golden.name, test_case=test_case)
+        return test_case
+
     tables = []
     for run in range(1, n_times + 1):
         # A trace left open by an earlier cell or a run that was stopped would break this run
         current_span_context.set(None)
         current_trace_context.set(None)
-        test_cases = run_goldens(agent, goldens, dataset, trace=True)
-        evaluate(
-            test_cases=test_cases,
+        test_cases = []
+        for golden in EvaluationDataset(goldens=goldens).evals_iterator(
             metrics=[RightMetric()],
             identifier=f"{name}, run {run}",
             async_config=AsyncConfig(run_async=False),
-        )
+        ):
+            test_cases.append(traced_claim(golden))
         tables.append(score_table(test_cases).assign(run=run))
     return pd.concat(tables, ignore_index=True)
