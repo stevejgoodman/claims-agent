@@ -17,7 +17,7 @@ def run_goldens(agent, goldens, dataset: Dataset, trace: bool = False) -> list:
     """Run the agent once on every golden and return a test case for each."""
     callbacks = None
     if trace:
-        from deepeval.integrations.langchain import CallbackHandler
+        from langfuse.langchain import CallbackHandler
 
         callbacks = [CallbackHandler()]
     test_cases = []
@@ -28,14 +28,15 @@ def run_goldens(agent, goldens, dataset: Dataset, trace: bool = False) -> list:
     return test_cases
 
 
-def run_experiment(name: str, config: AgentConfig, claims: list[dict], dataset: Dataset, n_times: int = 1) -> pd.DataFrame:
-    """Run a config on the claims n_times, score each run with DeepEval, and return the claims of every run in one table."""
+def run_experiment(name: str, config: AgentConfig, claims: list[dict], dataset: Dataset, n_times: int = 1, metrics: list | None = None) -> pd.DataFrame:
+    """Run a config on the claims n_times, score each run with DeepEval (RightMetric unless metrics is given), and return the claims of every run in one table."""
     from deepeval.dataset import EvaluationDataset
     from deepeval.evaluate.configs import AsyncConfig
-    from deepeval.integrations.langchain import CallbackHandler
+    from langfuse.langchain import CallbackHandler
     from deepeval.tracing import observe, update_current_trace
     from deepeval.tracing.context import current_span_context, current_trace_context
 
+    metrics = metrics or [RightMetric()]
     goldens = make_goldens(claims, dataset)
     agent = build_agent(config, dataset)
 
@@ -55,7 +56,7 @@ def run_experiment(name: str, config: AgentConfig, claims: list[dict], dataset: 
         current_trace_context.set(None)
         test_cases = []
         for golden in EvaluationDataset(goldens=goldens).evals_iterator(
-            metrics=[RightMetric()],
+            metrics=metrics,
             identifier=f"{name}, run {run}",
             async_config=AsyncConfig(run_async=False),
         ):
