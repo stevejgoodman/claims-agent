@@ -68,6 +68,7 @@ def score_table(test_cases):
             "mistake_cost": mistake_cost(answer, expected),
             "found_fact": found_fact(answer, expected),
             "llm_cost": answer["cost"],
+            "tools_called": [t.name for t in (test_case.tools_called or [])],
             "rationale": answer["rationale"],
         })
     return pd.DataFrame(rows).sort_values("claim_id")
