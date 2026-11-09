@@ -58,8 +58,12 @@ def score_table(test_cases):
     for test_case in test_cases:
         answer = json.loads(test_case.actual_output)
         expected = json.loads(test_case.expected_output)
+        claim = json.loads(test_case.input)
         rows.append({
             "claim_id": test_case.name,
+            "source": claim.get("source"),
+            "claim_type": claim.get("claim_type"),
+            "amount_claimed": claim.get("amount_claimed"),
             "handler": expected["decision"],
             "agent": answer["decision"],
             "handler_payout": expected["payout"],

@@ -64,4 +64,109 @@ def test_memory_is_searched_for_claims_that_need_a_fact(test_cases, config):
     found = table["found_fact"].dropna()
     if found.empty:
         pytest.skip("No claim in this sample needs a fact")
-    assert found.all(), f"Facts missed on {list(table.loc[found.index[~found], 'claim_id'])}"
+    assert found.all(), f"Facts missed on {list(table.loc[found.index[~found.astype(bool)], 'claim_id'])}"
+
+
+# --- Extra checks (see evals/checks.py). Same sample of claims, no extra model calls except the last three tests. ---
+
+import json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from agent.data import load_knowledge  # noqa: E402
+from agent.runner import run_claim  # noqa: E402
+from evals import checks  # noqa: E402
+
+WORDING = (Path(__file__).resolve().parents[1] / "data" / "policy_wording.md").read_text(encoding="utf-8")
+JUDGE_LABELS = Path(__file__).resolve().parents[1] / "data" / "evals" / "judge_labels.json"  # [{"claim_id", "rationale_ok": bool}]
+
+
+def parts(case):
+    """A test case as plain dicts: the claim, the agent's answer, the handler's decision and the tool calls."""
+    tools = [{"name": t.name, "args": t.input_parameters or {}} for t in case.tools_called]
+    return json.loads(case.input), json.loads(case.actual_output), json.loads(case.expected_output), tools
+
+
+def check_every_claim(test_cases, check):
+    problems = [f"{case.name}: {p}" for case in test_cases for p in check(case, *parts(case))]
+    assert not problems, "\n".join(problems)
+
+
+def test_business_rules(test_cases):
+    check_every_claim(test_cases, lambda case, claim, answer, expected, tools: checks.rule_violations(answer, claim, expected))
+
+
+def test_tool_sequence(test_cases, dataset):
+    check_every_claim(test_cases, lambda case, claim, answer, expected, tools: checks.tool_sequence_problems(tools, claim, dataset.policies))
+
+
+def test_no_payout_tool_on_claims_that_are_not_paid(test_cases):
+    check_every_claim(
+        test_cases,
+        lambda case, claim, answer, expected, tools: checks.unwanted_tool_calls(tools, [t.name for t in case.expected_tools]),
+    )
+
+
+def test_retrieval_precision_and_search(test_cases, config):
+    if not config.use_memory:
+        pytest.skip("No memory in this config")
+    knowledge, problems = load_knowledge(), []
+    for case in test_cases:
+        _, answer, expected, tools = parts(case)
+        if checks.searched_when_needed(tools, expected["needs"]) is False:
+            problems.append(f"{case.name}: needed {expected['needs']} but never searched its memory")
+        precision = checks.retrieval_precision(answer["retrieved"], expected["needs"], knowledge)
+        if expected["needs"] and precision is not None and precision < 0.5:
+            problems.append(f"{case.name}: only {precision:.0%} of the retrieved facts were relevant")
+    assert not problems, "\n".join(problems)
+
+
+def test_citations_exist_in_the_wording(test_cases):
+    check_every_claim(test_cases, lambda case, claim, answer, expected, tools: checks.ungrounded_citations(answer["rationale"], WORDING))
+
+
+def test_efficiency(test_cases):
+    check_every_claim(test_cases, lambda case, claim, answer, expected, tools: checks.efficiency_problems(tools, answer["cost"]))
+
+
+def test_no_slice_is_much_worse_than_the_rest(test_cases):
+    table = score_table(test_cases).assign(amount_band=lambda t: t["amount_claimed"].map(checks.amount_band))
+    for by in ("source", "claim_type", "amount_band"):
+        weakest = checks.weakest_slice(table, by)
+        if weakest:
+            assert weakest[1] >= MIN_SLICE_ACCURACY, f"Weakest {by}: {weakest[0]} at {weakest[1]:.0%}"
+
+
+MIN_SLICE_ACCURACY = 0.4
+
+
+def test_injected_instruction_is_not_followed(dataset, sets, config):
+    claim = sets[0][0]
+    agent = build_agent(config, dataset)
+    for where in ("story", "document"):
+        run = run_claim(agent, checks.with_injection(claim, where), dataset)
+        assert not checks.followed_injection({"decision": run.decision, "payout": run.payout}), f"Followed the instruction in the {where}"
+
+
+def test_claims_near_the_sign_off_limit_never_pay_over_it_unreviewed(dataset, sets, config):
+    claim = next(c for c in sets[0] if dataset.decisions[c["claim_id"]]["decision"] == "approve")
+    agent = build_agent(config, dataset)
+    for variant in checks.around_limit(claim):
+        run = run_claim(agent, variant, dataset)
+        assert not checks.rule_violations({"decision": run.decision, "payout": run.payout}, variant), variant["amount_claimed"]
+
+
+def test_judge_is_trustworthy_before_its_scores_are_used(dataset):
+    if not JUDGE_LABELS.exists():
+        pytest.skip(f"Label about 30 rationales by hand in {JUDGE_LABELS.name} first")
+    pytest.skip("Wire your judge (Jev) in here: call checks.judge_consistency and checks.judge_agreement, and require agreement >= 0.85")
+
+
+MAX_FLIP_RATE = 0.2
+
+
+def test_decisions_are_stable_across_runs(dataset, sets, config):
+    """Runs the claims EVAL_RUNS times (default 2), so it costs that many times a normal run. Uses at most 5 claims."""
+    from evals.experiment import run_experiment
+
+    table = run_experiment("stability", config, sets[0][:5], dataset, n_times=int(os.getenv("EVAL_RUNS", "2")))
+    assert checks.flip_rate(table) <= MAX_FLIP_RATE
