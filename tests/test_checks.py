@@ -214,25 +214,7 @@ def test_duplicate_claim_has_a_new_id(claim):
     assert checks.duplicate_of(claim, "CLM-DUP")["story"] == claim["story"]
 
 
-# --- 8, 9. Judge -----------------------------------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(("reply", "verdict"), [("PASS. Supported.", True), ("fail: invented a receipt", False), ("Maybe", None), ("", None)])
-def test_judge_verdict(reply, verdict):
-    assert checks.judge_verdict(reply) is verdict
-
-
-def test_judge_prompts_carry_the_answer(claim):
-    seen = []
-
-    def judge(prompt):
-        seen.append(prompt)
-        return "PASS fine"
-
-    answer = {"decision": "approve", "payout": 245.0, "rationale": "Covered under section 3.", "retrieved": ""}
-    assert checks.judge_faithfulness(judge, claim, answer) is True
-    assert checks.judge_consistency(judge, answer) is True
-    assert all("Covered under section 3." in p for p in seen)
+# --- 9. Checking a judge (the judges are metrics; see test_metrics.py) -----------------------------------------------------------------------------------------------------
 
 
 def test_judge_agreement_exposes_an_always_pass_judge():
