@@ -75,15 +75,24 @@ from pathlib import Path  # noqa: E402
 from agent.data import load_knowledge  # noqa: E402
 from agent.runner import run_claim  # noqa: E402
 from evals import checks  # noqa: E402
+from evals.metrics import business_rules_metric, case_parts, citations_metric, judge_passes, tool_sequence_metric  # noqa: E402
 
 WORDING = (Path(__file__).resolve().parents[1] / "data" / "policy_wording.md").read_text(encoding="utf-8")
-JUDGE_LABELS = Path(__file__).resolve().parents[1] / "data" / "evals" / "judge_labels.json"  # [{"claim_id", "rationale_ok": bool}]
+JUDGE_LABELS = Path(__file__).resolve().parents[1] / "data" / "evals" / "judge_labels.json"
 
 
-def parts(case):
-    """A test case as plain dicts: the claim, the agent's answer, the handler's decision and the tool calls."""
-    tools = [{"name": t.name, "args": t.input_parameters or {}} for t in case.tools_called]
-    return json.loads(case.input), json.loads(case.actual_output), json.loads(case.expected_output), tools
+parts = case_parts
+
+
+def assert_metric_on_every_case(test_cases, metric_factory):
+    """Fresh metric for each case, so one case's score never leaks into the next."""
+    failures = []
+    for case in test_cases:
+        try:
+            assert_test(case, [metric_factory()])
+        except AssertionError as error:
+            failures.append(f"{case.name}: {error}")
+    assert not failures, "\n".join(failures)
 
 
 def check_every_claim(test_cases, check):
@@ -92,12 +101,11 @@ def check_every_claim(test_cases, check):
 
 
 def test_business_rules(test_cases):
-    check_every_claim(test_cases, lambda case, claim, answer, expected, tools: checks.rule_violations(answer, claim, expected))
+    assert_metric_on_every_case(test_cases, business_rules_metric)
 
 
 def test_tool_sequence(test_cases, dataset):
-    check_every_claim(test_cases, lambda case, claim, answer, expected, tools: checks.tool_sequence_problems(tools, claim, dataset.policies))
-
+    assert_metric_on_every_case(test_cases, lambda: tool_sequence_metric(dataset.policies))
 
 def test_no_payout_tool_on_claims_that_are_not_paid(test_cases):
     check_every_claim(
@@ -121,7 +129,7 @@ def test_retrieval_precision_and_search(test_cases, config):
 
 
 def test_citations_exist_in_the_wording(test_cases):
-    check_every_claim(test_cases, lambda case, claim, answer, expected, tools: checks.ungrounded_citations(answer["rationale"], WORDING))
+    assert_metric_on_every_case(test_cases, lambda: citations_metric(WORDING))
 
 
 def test_efficiency(test_cases):
@@ -155,10 +163,20 @@ def test_claims_near_the_sign_off_limit_never_pay_over_it_unreviewed(dataset, se
         assert not checks.rule_violations({"decision": run.decision, "payout": run.payout}, variant), variant["amount_claimed"]
 
 
+MIN_JUDGE_AGREEMENT = 0.85
+
+
 def test_judge_is_trustworthy_before_its_scores_are_used(dataset):
+    """Needs about 30 hand-labelled rationales. Each label is {claim_id, decision, payout, rationale, retrieved, rationale_ok},
+    where rationale_ok is true when the explanation is both faithful and consistent."""
     if not JUDGE_LABELS.exists():
         pytest.skip(f"Label about 30 rationales by hand in {JUDGE_LABELS.name} first")
-    pytest.skip("Wire your judge (Jev) in here: call checks.judge_consistency and checks.judge_agreement, and require agreement >= 0.85")
+    labels = json.loads(JUDGE_LABELS.read_text(encoding="utf-8"))
+    claims = {claim["claim_id"]: claim for claim in dataset.claims}
+    judged = [judge_passes(claims[label["claim_id"]], label) for label in labels]
+    agreement = checks.judge_agreement(judged, [label["rationale_ok"] for label in labels])
+    assert agreement["accuracy"] >= MIN_JUDGE_AGREEMENT, agreement
+    assert agreement["true_negative_rate"] >= MIN_JUDGE_AGREEMENT, f"The judge lets bad rationales through: {agreement}"
 
 
 MAX_FLIP_RATE = 0.2
