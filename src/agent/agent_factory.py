@@ -22,7 +22,7 @@ class AgentConfig:
     reasoning_effort: str = "low"
     use_memory: bool = True
     use_payout_tool: bool = True
-    use_context: bool = False
+    context_files: tuple[str, ...] = ("policy_wording.md",)  # reference documents the agent can search; () for none
     instructions: str = INSTRUCTIONS
     tool_retries: int = 3
 
@@ -48,8 +48,9 @@ def build_agent(config: AgentConfig, dataset: Dataset, llm=None) -> Agent:
     )
     ledger = Ledger()
     tools = make_tools(dataset.policies, ledger, config.use_payout_tool)
-    if config.use_context:
-        tools += make_context_tools(load_context())
+    if config.context_files:
+        documents = load_context()
+        tools += make_context_tools({name: documents[name] for name in config.context_files})
     kwargs = {}
     if config.use_memory:
         tools += memory_tools()
@@ -57,7 +58,7 @@ def build_agent(config: AgentConfig, dataset: Dataset, llm=None) -> Agent:
     graph = create_agent(
         model=llm,
         tools=tools,
-        system_prompt=build_system_prompt(config.use_memory, config.use_payout_tool, config.instructions, config.use_context),
+        system_prompt=build_system_prompt(config.use_memory, config.use_payout_tool, config.instructions, config.context_files),
         middleware=[ToolRetryMiddleware(max_retries=config.tool_retries)],
         **kwargs,
     )

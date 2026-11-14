@@ -3,7 +3,7 @@
 import json
 
 INSTRUCTIONS = """You are a claims handler at UnderCover Travel Insurance.
-Decide the claim you are given, using the policy wording below and the customer's policy record.
+Decide the claim you are given, using the policy wording and the customer's policy record.
 
 Choose one decision:
 - approve: the wording covers the claim and the required documents are attached. Work out the payout using section 10.
@@ -20,6 +20,10 @@ MEMORY_LINE = "When you are asked a question, use your tools to search your memo
 PAYOUT_TOOL_LINE = "Use the payout tool to work out the payout on an approved claim, and record the payout it returns.\n"
 
 # Only added when the agent has the context tools
+WORDING_LINE = (
+    "The policy wording is not in this message. "
+    "Search or read it with your context tools to find the rules that apply, and rely on it over your own assumptions.\n"
+)
 CONTEXT_LINE = (
     "The policy wording and the claims handling manual are not in this message. "
     "Search or read them with your context tools to find the rules that apply, and rely on them over your own assumptions.\n"
@@ -27,14 +31,17 @@ CONTEXT_LINE = (
 
 
 def build_system_prompt(
-    use_memory: bool = True, use_payout_tool: bool = True, instructions: str = INSTRUCTIONS, use_context: bool = False
+    use_memory: bool = True, use_payout_tool: bool = True, instructions: str = INSTRUCTIONS,
+    context_files: tuple[str, ...] = ()
 ) -> str:
     prompt = instructions
     if use_memory:
         prompt += MEMORY_LINE
     if use_payout_tool:
         prompt += PAYOUT_TOOL_LINE
-    if use_context:
+    if context_files == ("policy_wording.md",):
+        prompt += WORDING_LINE
+    elif context_files:
         prompt += CONTEXT_LINE
     return prompt
 

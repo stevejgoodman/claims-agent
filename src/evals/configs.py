@@ -3,12 +3,14 @@
 from dataclasses import replace
 
 from agent.agent_factory import AgentConfig
+from agent.context import load_context
 
 BASELINE = AgentConfig()
 
 CONFIGS = {
     "baseline": BASELINE,
-    "with_context": replace(BASELINE, use_context=True),
+    "with_context": replace(BASELINE, context_files=tuple(load_context())),  # the wording, the claims manual and the rest
+    "no_context": replace(BASELINE, context_files=()),
     "no_memory": replace(BASELINE, use_memory=False),
     "no_payout_tool": replace(BASELINE, use_payout_tool=False),
     "high_reasoning": replace(BASELINE, reasoning_effort="high"),
