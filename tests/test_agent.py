@@ -3,7 +3,7 @@ import json
 from langchain_core.messages import AIMessage
 
 from agent.agent_factory import AgentConfig, build_agent
-from agent.prompts import MEMORY_LINE, PAYOUT_TOOL_LINE, build_system_prompt
+from agent.prompts import CONTEXT_LINE, MEMORY_LINE, PAYOUT_TOOL_LINE, WORDING_LINE, build_system_prompt
 from agent.runner import run_claim
 from agent.tools import Ledger, make_tools
 
@@ -102,5 +102,15 @@ def test_context_tools_find_the_manual_and_the_wording():
 
 def test_context_tools_are_optional(dataset, scripted_model):
     names = lambda config: {t.name for t in build_agent(config, dataset, llm=scripted_model()).graph.get_graph().nodes["tools"].data.tools_by_name.values()}  # noqa: E731
-    assert "search_context" in names(AgentConfig(use_memory=False, use_context=True))
-    assert "search_context" not in names(AgentConfig(use_memory=False))
+    assert "search_context" in names(AgentConfig(use_memory=False))  # the baseline can search the policy wording
+    assert "search_context" not in names(AgentConfig(use_memory=False, context_files=()))
+
+
+def test_baseline_context_is_only_the_policy_wording(dataset, scripted_model):
+    from evals.configs import get_config
+
+    assert get_config("baseline").context_files == ("policy_wording.md",)
+    assert "claims_manual.md" in get_config("with_context").context_files
+    assert WORDING_LINE in build_system_prompt(context_files=("policy_wording.md",))
+    assert CONTEXT_LINE in build_system_prompt(context_files=("policy_wording.md", "claims_manual.md"))
+    assert WORDING_LINE not in build_system_prompt() and CONTEXT_LINE not in build_system_prompt()
