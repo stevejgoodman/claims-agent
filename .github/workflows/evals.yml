@@ -20,6 +20,7 @@ jobs:
     name: Evals on set A
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: evals runner # holds the OPENROUTER_API_KEY secret
     # Secrets are not shared with fork PRs, and fork code must not run with them.
     # Skipped -> the required check is not satisfied; fork PRs need a maintainer to push the branch to this repo.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
