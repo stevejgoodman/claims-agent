@@ -1,0 +1,74 @@
+name: Evals
+
+# Gate: live evals on 25 claims of dataset set A must pass before merging to main.
+# The job always runs so the required "Evals on set A" check always reports, but it only spends
+# money when agent, eval, data or dependency files changed.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: evals-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    name: Evals on set A
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # Secrets are not shared with fork PRs, and fork code must not run with them.
+    # Skipped -> the required check is not satisfied; fork PRs need a maintainer to push the branch to this repo.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # embeddings for the agent's memory search
+      EVAL_SET: A
+      EVAL_MAX: "25" # the first 25 claims of set A (0 = all 50)
+      EVAL_CONFIG: with_context
+      DEEPEVAL_TELEMETRY_OPT_OUT: "YES"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Did anything the evals depend on change?
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          if git diff --name-only "$base"...HEAD | grep -qE '^(src/|tests/|data/|context/|pyproject\.toml|uv\.lock|\.github/workflows/evals\.yml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No agent, eval, data or dependency changes; skipping the live evals."
+          fi
+
+      - name: Check the API key is set
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          for key in OPENROUTER_API_KEY OPENAI_API_KEY; do
+            [ -n "${!key}" ] || { echo "::error::Add $key as a repository secret"; exit 1; }
+            if [[ "${!key}" =~ [[:space:]] ]]; then
+              echo "::error::$key contains whitespace or a newline; re-paste it without a trailing newline"; exit 1
+            fi
+          done
+
+      - uses: astral-sh/setup-uv@v5
+        if: steps.changes.outputs.run == 'true'
+        with:
+          enable-cache: true
+          python-version: "3.12" # same as local development
+
+      - name: Install dependencies
+        if: steps.changes.outputs.run == 'true'
+        run: uv sync --frozen
+
+      - name: Run evals on set A
+        if: steps.changes.outputs.run == 'true'
+        run: uv run pytest -m eval tests/test_evals.py -v
