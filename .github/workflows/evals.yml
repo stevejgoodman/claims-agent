@@ -20,7 +20,6 @@ jobs:
     name: Evals on set A
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    environment: evals runner # holds the OPENROUTER_API_KEY secret
     # Secrets are not shared with fork PRs, and fork code must not run with them.
     # Skipped -> the required check is not satisfied; fork PRs need a maintainer to push the branch to this repo.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -54,7 +53,7 @@ jobs:
         if: steps.changes.outputs.run == 'true'
         run: |
           for key in OPENROUTER_API_KEY OPENAI_API_KEY; do
-            [ -n "${!key}" ] || { echo "::error::Add $key as a secret in the 'evals runner' environment"; exit 1; }
+            [ -n "${!key}" ] || { echo "::error::Add $key as a repository secret"; exit 1; }
           done
 
       - uses: astral-sh/setup-uv@v5
