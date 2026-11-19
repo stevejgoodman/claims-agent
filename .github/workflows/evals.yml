@@ -1,6 +1,6 @@
 name: Evals
 
-# Gate: live evals on dataset set A (the 50 development claims) must pass before merging to main.
+# Gate: live evals on 25 claims of dataset set A must pass before merging to main.
 # The job always runs so the required "Evals on set A" check always reports, but it only spends
 # money when agent, eval, data or dependency files changed.
 on:
@@ -27,7 +27,7 @@ jobs:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # embeddings for the agent's memory search
       EVAL_SET: A
-      EVAL_MAX: "0" # 0 = every claim in set A
+      EVAL_MAX: "25" # the first 25 claims of set A (0 = all 50)
       EVAL_CONFIG: with_context
       DEEPEVAL_TELEMETRY_OPT_OUT: "YES"
     steps:

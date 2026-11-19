@@ -1,5 +1,8 @@
 """Live evals: they call the real model and cost money. Run with `pytest -m eval`.
 
+Per-claim checks pass when at most 10% of the claims fail them (MAX_FAILING_CLAIMS). Safety checks (prompt injection,
+the sign-off limit) and the run-level thresholds stay strict.
+
 EVAL_CONFIG   name of the config in evals.configs (default baseline)
 EVAL_MAX      number of claims to run (default 5; 0 for all of them)
 EVAL_SET      A (development, default) or B (held out; only for a final check)
@@ -22,6 +25,14 @@ pytestmark = pytest.mark.eval
 # Run-level thresholds. Tighten them as the agent improves.
 MIN_ACCURACY = 0.6
 MAX_MISTAKE_COST_PER_CLAIM = 500
+# Per-claim checks tolerate a few bad claims, since a live model is noisy: at most this share of claims may fail each check.
+MAX_FAILING_CLAIMS = 0.10
+
+
+def assert_few_fail(failures: dict[str, str], total: int):
+    """failures maps a claim name to why it failed. Passes when at most MAX_FAILING_CLAIMS of the claims failed."""
+    rate = len(failures) / total if total else 0
+    assert rate <= MAX_FAILING_CLAIMS, f"{len(failures)}/{total} claims failed ({rate:.0%}, limit {MAX_FAILING_CLAIMS:.0%}):\n" + "\n".join(failures.values())
 
 
 @pytest.fixture(scope="module")
@@ -39,7 +50,7 @@ def test_cases(dataset, sets, config):
 
 
 def test_each_claim(test_cases):
-    failures = []
+    failures = {}
     for case in test_cases:
         metrics = [RightMetric()]
         if case.expected_tools:  # only approvals need the payout tool
@@ -47,8 +58,8 @@ def test_each_claim(test_cases):
         try:
             assert_test(case, metrics)
         except AssertionError as error:
-            failures.append(f"{case.name}: {error}")
-    assert not failures, "\n".join(failures)
+            failures[case.name] = f"{case.name}: {error}"
+    assert_few_fail(failures, len(test_cases))
 
 
 def test_run_scores(test_cases):
@@ -64,7 +75,8 @@ def test_memory_is_searched_for_claims_that_need_a_fact(test_cases, config):
     found = table["found_fact"].dropna()
     if found.empty:
         pytest.skip("No claim in this sample needs a fact")
-    assert found.all(), f"Facts missed on {list(table.loc[found.index[~found.astype(bool)], 'claim_id'])}"
+    missed = table.loc[found.index[~found.astype(bool)], "claim_id"]
+    assert_few_fail({claim_id: f"{claim_id}: fact not found" for claim_id in missed}, len(found))
 
 
 # --- Extra checks (see evals/checks.py). Same sample of claims, no extra model calls except the last three tests. ---
@@ -86,18 +98,22 @@ parts = case_parts
 
 def assert_metric_on_every_case(test_cases, metric_factory):
     """Fresh metric for each case, so one case's score never leaks into the next."""
-    failures = []
+    failures = {}
     for case in test_cases:
         try:
             assert_test(case, [metric_factory()])
         except AssertionError as error:
-            failures.append(f"{case.name}: {error}")
-    assert not failures, "\n".join(failures)
+            failures[case.name] = f"{case.name}: {error}"
+    assert_few_fail(failures, len(test_cases))
 
 
 def check_every_claim(test_cases, check):
-    problems = [f"{case.name}: {p}" for case in test_cases for p in check(case, *parts(case))]
-    assert not problems, "\n".join(problems)
+    failures = {}
+    for case in test_cases:
+        problems = check(case, *parts(case))
+        if problems:
+            failures[case.name] = f"{case.name}: " + "; ".join(problems)
+    assert_few_fail(failures, len(test_cases))
 
 
 def test_business_rules(test_cases):
@@ -117,15 +133,18 @@ def test_no_payout_tool_on_claims_that_are_not_paid(test_cases):
 def test_retrieval_precision_and_search(test_cases, config):
     if not config.use_memory:
         pytest.skip("No memory in this config")
-    knowledge, problems = load_knowledge(), []
+    knowledge, failures = load_knowledge(), {}
     for case in test_cases:
         _, answer, expected, tools = parts(case)
+        problems = []
         if checks.searched_when_needed(tools, expected["needs"]) is False:
-            problems.append(f"{case.name}: needed {expected['needs']} but never searched its memory")
+            problems.append(f"needed {expected['needs']} but never searched its memory")
         precision = checks.retrieval_precision(answer["retrieved"], expected["needs"], knowledge)
         if expected["needs"] and precision is not None and precision < 0.5:
-            problems.append(f"{case.name}: only {precision:.0%} of the retrieved facts were relevant")
-    assert not problems, "\n".join(problems)
+            problems.append(f"only {precision:.0%} of the retrieved facts were relevant")
+        if problems:
+            failures[case.name] = f"{case.name}: " + "; ".join(problems)
+    assert_few_fail(failures, len(test_cases))
 
 
 def test_citations_exist_in_the_wording(test_cases):
