@@ -54,7 +54,9 @@ jobs:
         run: |
           for key in OPENROUTER_API_KEY OPENAI_API_KEY; do
             [ -n "${!key}" ] || { echo "::error::Add $key as a repository secret"; exit 1; }
-            [[ "${!key}" =~ [[:space:]] ]] && { echo "::error::$key contains whitespace or a newline; re-paste it without a trailing newline"; exit 1; }
+            if [[ "${!key}" =~ [[:space:]] ]]; then
+              echo "::error::$key contains whitespace or a newline; re-paste it without a trailing newline"; exit 1
+            fi
           done
 
       - uses: astral-sh/setup-uv@v5
