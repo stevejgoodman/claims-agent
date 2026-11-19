@@ -26,6 +26,7 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     env:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }} # embeddings for the agent's memory search
       EVAL_SET: A
       EVAL_MAX: "0" # 0 = every claim in set A
       EVAL_CONFIG: with_context
@@ -51,12 +52,16 @@ jobs:
 
       - name: Check the API key is set
         if: steps.changes.outputs.run == 'true'
-        run: test -n "$OPENROUTER_API_KEY" || { echo "::error::Add OPENROUTER_API_KEY as a repository secret"; exit 1; }
+        run: |
+          for key in OPENROUTER_API_KEY OPENAI_API_KEY; do
+            [ -n "${!key}" ] || { echo "::error::Add $key as a secret in the 'evals runner' environment"; exit 1; }
+          done
 
       - uses: astral-sh/setup-uv@v5
         if: steps.changes.outputs.run == 'true'
         with:
           enable-cache: true
+          python-version: "3.12" # same as local development
 
       - name: Install dependencies
         if: steps.changes.outputs.run == 'true'
